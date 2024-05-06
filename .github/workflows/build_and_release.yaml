@@ -1,0 +1,74 @@
+name: Build and Publish Gavel Binary
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Setup Rust toolchain; automatically matches the @rev of the action
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Build the release binary
+      - name: Build Release Binary
+        run: cargo build --release
+
+      # Generate SHA512 hash for the binary
+      - name: Generate SHA512 hash
+        run: |
+          (cd target/release && sha512sum gavel > gavel.sha512)
+
+      # Import GPG Key
+      - name: Import GPG Key
+        run: echo "${{ secrets.GAVEL_PGP }}" | gpg --batch --import
+
+      # Configure GPG
+      - name: Configure GPG
+        run: |
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye
+
+      # Sign binary and hash
+      - name: Sign binary and hash
+        run: |
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --armor --default-key hq@rotko.net --output target/release/gavel.sig target/release/gavel
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --armor --default-key hq@rotko.net --output target/release/gavel.sha512.sig target/release/gavel.sha512
+
+      # Upload artifacts
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: gavel-and-signatures
+          path: |
+            target/release/gavel
+            target/release/gavel.sig
+            target/release/gavel.sha512
+            target/release/gavel.sha512.sig
+
+      # Bump version and tag
+      - name: Bump version and tag
+        id: bump_version
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          WITH_V: false
+
+      # Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/gavel
+            target/release/gavel.sig
+            target/release/gavel.sha512
+            target/release/gavel.sha512.sig
+          tag_name: ${{ steps.bump_version.outputs.new_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
