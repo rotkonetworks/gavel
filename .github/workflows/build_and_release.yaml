@@ -27,7 +27,7 @@ jobs:
 
       # Import GPG Key
       - name: Import GPG Key
-        run: echo "${{ secrets.GAVEL_PGP }}" | gpg --batch --import
+        run: echo "${{ secrets.HQ_ROTKO_GPG }}" | gpg --batch --import
 
       # Configure GPG
       - name: Configure GPG
