@@ -154,14 +154,14 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
 
     // Combine metadata and block data
     let metadata = json!({
-        "node_version": version,
-        "node_name": node_name,
-        "node_chain": node_chain,
-        "node_health": node_health,
+        "chain": node_chain,
+        "client": node_name,
+        "health": node_health,
+        "version": version,
     });
 
     let mut combined_data = block_data.clone();
-    combined_data["node_metadata"] = metadata;
+    combined_data["metadata"] = metadata;
 
     // Print the combined data in pretty JSON format
     println!("{}", serde_json::to_string_pretty(&combined_data)?);
