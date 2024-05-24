@@ -109,12 +109,15 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
         { "jsonrpc": "2.0", "id": "2", "method": "system_name", "params": [] },
         { "jsonrpc": "2.0", "id": "3", "method": "system_chain", "params": [] },
         { "jsonrpc": "2.0", "id": "4", "method": "system_health", "params": [] },
-        { "jsonrpc": "2.0", "id": "5", "method": if formatted_block_number.is_some() { "chain_getBlockHash" } else { "chain_getHead" }, "params": [formatted_block_number] }
+        { "jsonrpc": "2.0", "id": "5", "method": if formatted_block_number.is_some() { "chain_getBlockHash" } else { "chain_getHead" }, "params": [formatted_block_number] },
+        { "jsonrpc": "2.0", "id": "6", "method": "chain_getFinalizedHead", "params": [] },
+        { "jsonrpc": "2.0", "id": "7", "method": "state_getRuntimeVersion", "params": [] },
+        { "jsonrpc": "2.0", "id": "8", "method": "system_peers", "params": [] },
+        { "jsonrpc": "2.0", "id": "9", "method": "system_syncState", "params": [] }
     ]);
 
     // Send the batch request
     socket.send(Message::Text(batch_request.to_string())).await?;
-    // println!("Sent batch request: {}", batch_request);
 
     // Initialize response storage
     let mut version = None;
@@ -122,9 +125,14 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let mut node_chain = None;
     let mut node_health = None;
     let mut block_hash = None;
+    let mut finalized_head = None;
+    let mut runtime_version = None;
+    let mut peers = None;
+    let mut sync_state = None;
 
     // Read and process responses
-    while version.is_none() || node_name.is_none() || node_chain.is_none() || node_health.is_none() || block_hash.is_none() {
+    while version.is_none() || node_name.is_none() || node_chain.is_none() || node_health.is_none() || block_hash.is_none() ||
+          finalized_head.is_none() || runtime_version.is_none() || peers.is_none() || sync_state.is_none() {
         let message = socket.next().await.ok_or("Connection closed before receiving response")??;
         if let Message::Text(text) = message {
             let responses: Vec<Value> = serde_json::from_str(&text)?;
@@ -135,10 +143,13 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
                     Some("3") => node_chain = Some(response["result"].as_str().unwrap_or_default().to_string()),
                     Some("4") => node_health = Some(response["result"].clone()),
                     Some("5") => block_hash = Some(response["result"].as_str().unwrap_or_default().to_string()),
+                    Some("6") => finalized_head = Some(response["result"].as_str().unwrap_or_default().to_string()),
+                    Some("7") => runtime_version = Some(response["result"].clone()),
+                    Some("8") => peers = Some(response["result"].clone()),
+                    Some("9") => sync_state = Some(response["result"].clone()),
                     _ => {}
                 }
             }
-            // println!("Received and parsed message: {}", text);
         }
     }
 
@@ -148,23 +159,29 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let node_chain = node_chain.ok_or("Failed to fetch node chain")?;
     let node_health = node_health.ok_or("Failed to fetch node health")?;
     let block_hash = block_hash.ok_or("Failed to fetch block hash")?;
+    let finalized_head = finalized_head.ok_or("Failed to fetch finalized head")?;
+    let runtime_version = runtime_version.ok_or("Failed to fetch runtime version")?;
+    let peers = peers.ok_or("Failed to fetch peers")?;
+    let sync_state = sync_state.ok_or("Failed to fetch sync state")?;
 
-    // Fetch block data
     let block_data = send_and_receive(&mut socket, "chain_getBlock", json!([block_hash])).await?;
 
-    // Combine metadata and block data
     let metadata = json!({
-        "chain": node_chain,
-        "client": node_name,
-        "health": node_health,
         "version": version,
+        "client": node_name,
+        "chain": node_chain,
+        "health": node_health,
+        "finalized_head": finalized_head,
+        "runtime_version": runtime_version,
+        "peers": peers,
+        "sync_state": sync_state
     });
 
     let mut combined_data = block_data.clone();
     combined_data["metadata"] = metadata;
 
-    // Print the combined data in pretty JSON format
     println!("{}", serde_json::to_string_pretty(&combined_data)?);
+
     Ok(())
 }
 
