@@ -126,13 +126,13 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let mut node_health = None;
     let mut block_hash = None;
     let mut finalized_head = None;
-    let mut runtime_version = None;
+//    let mut runtime_version = None;
     let mut peers = None;
     let mut sync_state = None;
 
     // Read and process responses
     while version.is_none() || node_name.is_none() || node_chain.is_none() || node_health.is_none() || block_hash.is_none() ||
-          finalized_head.is_none() || runtime_version.is_none() || peers.is_none() || sync_state.is_none() {
+          finalized_head.is_none() /*|| runtime_version.is_none() */ || peers.is_none() || sync_state.is_none() {
         let message = socket.next().await.ok_or("Connection closed before receiving response")??;
         if let Message::Text(text) = message {
             let responses: Vec<Value> = serde_json::from_str(&text)?;
@@ -144,7 +144,7 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
                     Some("4") => node_health = Some(response["result"].clone()),
                     Some("5") => block_hash = Some(response["result"].as_str().unwrap_or_default().to_string()),
                     Some("6") => finalized_head = Some(response["result"].as_str().unwrap_or_default().to_string()),
-                    Some("7") => runtime_version = Some(response["result"].clone()),
+//                    Some("7") => runtime_version = Some(response["result"].clone()),
                     Some("8") => peers = Some(response["result"].clone()),
                     Some("9") => sync_state = Some(response["result"].clone()),
                     _ => {}
@@ -160,7 +160,7 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let node_health = node_health.ok_or("Failed to fetch node health")?;
     let block_hash = block_hash.ok_or("Failed to fetch block hash")?;
     let finalized_head = finalized_head.ok_or("Failed to fetch finalized head")?;
-    let runtime_version = runtime_version.ok_or("Failed to fetch runtime version")?;
+//    let runtime_version = runtime_version.ok_or("Failed to fetch runtime version")?;
     let peers = peers.ok_or("Failed to fetch peers")?;
     let sync_state = sync_state.ok_or("Failed to fetch sync state")?;
 
@@ -172,7 +172,7 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
         "chain": node_chain,
         "health": node_health,
         "finalized_head": finalized_head,
-        "runtime_version": runtime_version,
+//        "runtime_version": runtime_version,
         "peers": peers,
         "sync_state": sync_state
     });
