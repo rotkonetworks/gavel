@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use tokio::main;
+use tokio::time::Instant;
 use std::net::{Ipv4Addr,Ipv6Addr};
 use http::header::{HeaderValue, HOST};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -101,6 +102,8 @@ async fn custom_dns_connect(endpoint: &str, dns_override_v4: Option<Ipv4Addr>, d
 }
 
 async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&Ipv4Addr>, ipv6: Option<&Ipv6Addr>) -> Result<(), Box<dyn std::error::Error>> {
+    let start_time = Instant::now();
+
     // Convert block number to hexadecimal if necessary
     let formatted_block_number = identify_if_hexadecimal_or_decimal(block_number).await?;
     
@@ -135,7 +138,7 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let mut node_health = None;
     let mut block_hash = None;
     let mut finalized_head = None;
-//    let mut runtime_version = None;
+    let mut runtime_version = None;
     let mut peers = None;
     let mut sync_state = None;
 
@@ -153,7 +156,7 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
                     Some("4") => node_health = Some(response["result"].clone()),
                     Some("5") => block_hash = Some(response["result"].as_str().unwrap_or_default().to_string()),
                     Some("6") => finalized_head = Some(response["result"].as_str().unwrap_or_default().to_string()),
-//                    Some("7") => runtime_version = Some(response["result"].clone()),
+                    Some("7") => runtime_version = Some(response["result"].clone()),
                     Some("8") => peers = Some(response["result"].clone()),
                     Some("9") => sync_state = Some(response["result"].clone()),
                     _ => {}
@@ -169,11 +172,15 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
     let node_health = node_health.ok_or("Failed to fetch node health")?;
     let block_hash = block_hash.ok_or("Failed to fetch block hash")?;
     let finalized_head = finalized_head.ok_or("Failed to fetch finalized head")?;
-//    let runtime_version = runtime_version.ok_or("Failed to fetch runtime version")?;
+    let mut runtime_version = runtime_version.ok_or("Failed to fetch runtime version")?;
+    let mut runtime_version_map = runtime_version.as_object_mut().ok_or("Invalid runtime_version format")?.clone();
+    runtime_version_map.remove("apis");
     let peers = peers.ok_or("Failed to fetch peers")?;
     let sync_state = sync_state.ok_or("Failed to fetch sync state")?;
 
     let block_data = send_and_receive(&mut socket, "chain_getBlock", json!([block_hash])).await?;
+
+    let duration = start_time.elapsed();
 
     let metadata = json!({
         "version": version,
@@ -181,9 +188,10 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
         "chain": node_chain,
         "health": node_health,
         "finalized_head": finalized_head,
-//        "runtime_version": runtime_version,
+        "runtime_version": runtime_version_map,
         "peers": peers,
-        "sync_state": sync_state
+        "sync_state": sync_state,
+        "latency_ms": duration.as_millis(),
     });
 
     let mut combined_data = block_data.clone();
