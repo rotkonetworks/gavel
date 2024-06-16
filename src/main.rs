@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use tokio::main;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr,Ipv6Addr};
 use http::header::{HeaderValue, HOST};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::{protocol::Message, client::IntoClientRequest};
@@ -25,13 +25,17 @@ enum Commands {
         endpoint: String,
         block_number: Option<String>,
         #[clap(short, long, help = "Specify an IPv4 address to manually resolve the endpoint, bypassing DNS.")]
-        resolve: Option<Ipv4Addr>,
+        resolve_v4: Option<Ipv4Addr>,
+        #[clap(long, help = "Specify an IPv6 address to manually resolve the endpoint, bypassing DNS.")]
+        resolve_v6: Option<Ipv6Addr>,
     },
     Mmr {
         endpoint: String,
         block_numbers: Option<Vec<u64>>,
         #[clap(short, long, help = "Specify an IPv4 address to manually resolve the endpoint, bypassing DNS.")]
-        resolve: Option<Ipv4Addr>,
+        resolve_v4: Option<Ipv4Addr>,
+        #[clap(long, help = "Specify an IPv6 address to manually resolve the endpoint, bypassing DNS.")]
+        resolve_v6: Option<Ipv6Addr>,
     }
 }
 
@@ -39,13 +43,13 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Fetch { endpoint, block_number, resolve } => {
-            if let Err(e) = fetch_block(&endpoint, block_number.as_deref(), resolve.as_ref()).await {
+        Commands::Fetch { endpoint, block_number, resolve_v4, resolve_v6 } => {
+            if let Err(e) = fetch_block(&endpoint, block_number.as_deref(), resolve_v4.as_ref(), resolve_v6.as_ref()).await {
                 eprintln!("Error: {}", e);
             }
         }
-        Commands::Mmr { endpoint, block_numbers, resolve } => {
-            if let Err(e) = get_mmr_proof(&endpoint, block_numbers, resolve.as_ref()).await {
+        Commands::Mmr { endpoint, block_numbers, resolve_v4, resolve_v6 } => {
+            if let Err(e) = get_mmr_proof(&endpoint, block_numbers, resolve_v4.as_ref(), resolve_v6.as_ref()).await {
                 eprintln!("Error: {}", e);
             }
         }
@@ -69,13 +73,18 @@ async fn identify_if_hexadecimal_or_decimal(block_number: Option<&str>) -> Resul
     }
 }
 
-async fn custom_dns_connect(endpoint: &str, dns_override: Option<Ipv4Addr>) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> {
+async fn custom_dns_connect(endpoint: &str, dns_override_v4: Option<Ipv4Addr>, dns_override_v6: Option<Ipv6Addr>) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> {
     let url = Url::parse(endpoint)?;
-    let addr = if let Some(ip) = dns_override {
+    let addr = if let Some(ip) = dns_override_v4 {
         SocketAddr::new(IpAddr::V4(ip), url.port_or_known_default().ok_or("Unknown port for the URL scheme")?)
+    } else if let Some(ip) = dns_override_v6 {
+        SocketAddr::new(IpAddr::V6(ip), url.port_or_known_default().ok_or("Unknown port for the URL scheme")?)
     } else {
         let host = url.host_str().ok_or("Missing host in URL")?;
-        format!("{}:{}", host, url.port_or_known_default().unwrap_or(443)).parse::<SocketAddr>()?
+        tokio::net::lookup_host((host, url.port_or_known_default().unwrap_or(443)))
+            .await?
+            .next()
+            .ok_or("Failed to resolve host")?
     };
 
     let tcp_stream = TcpStream::connect(addr).await?;
@@ -91,13 +100,13 @@ async fn custom_dns_connect(endpoint: &str, dns_override: Option<Ipv4Addr>) -> R
     Ok(socket)
 }
 
-async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&Ipv4Addr>) -> Result<(), Box<dyn std::error::Error>> {
+async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&Ipv4Addr>, ipv6: Option<&Ipv6Addr>) -> Result<(), Box<dyn std::error::Error>> {
     // Convert block number to hexadecimal if necessary
     let formatted_block_number = identify_if_hexadecimal_or_decimal(block_number).await?;
     
     // Establish WebSocket connection, with optional DNS override
-    let mut socket = if let Some(ip) = ipv4 {
-        custom_dns_connect(endpoint, Some(*ip)).await?
+    let mut socket = if ipv4.is_some() || ipv6.is_some() {
+        custom_dns_connect(endpoint, ipv4.copied(), ipv6.copied()).await?
     } else {
         let (socket, _) = connect_async(endpoint).await?;
         socket
@@ -186,9 +195,9 @@ async fn fetch_block(endpoint: &str, block_number: Option<&str>, ipv4: Option<&I
 }
 
 
-async fn get_mmr_proof(endpoint: &str, block_numbers: Option<Vec<u64>>, ipv4: Option<&Ipv4Addr>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut socket = if let Some(ip) = ipv4 {
-        custom_dns_connect(endpoint, Some(*ip)).await?
+async fn get_mmr_proof(endpoint: &str, block_numbers: Option<Vec<u64>>, ipv4: Option<&Ipv4Addr>, ipv6: Option<&Ipv6Addr>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut socket = if ipv4.is_some() || ipv6.is_some() {
+        custom_dns_connect(endpoint, ipv4.copied(), ipv6.copied()).await?
     } else {
         let (socket, _) = connect_async(endpoint).await?;
         socket
